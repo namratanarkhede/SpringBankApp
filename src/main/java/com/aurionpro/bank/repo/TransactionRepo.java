@@ -10,4 +10,5 @@ import com.aurionpro.bank.entity.Transaction;
 public interface TransactionRepo extends JpaRepository<Transaction, Long> {
     Page<Transaction> findBySenderAccount_Customer(Customer customer, Pageable pageable);
     Page<Transaction> findByReceiverAccount_Customer(Customer customer, Pageable pageable);
+
 }

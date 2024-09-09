@@ -29,6 +29,7 @@ import com.aurionpro.bank.entity.Transaction;
 import com.aurionpro.bank.entity.User;
 import com.aurionpro.bank.enums.AccountStatus;
 import com.aurionpro.bank.enums.KycStatus;
+import com.aurionpro.bank.exception.CustomerServiceException;
 import com.aurionpro.bank.exception.UserApiException;
 import com.aurionpro.bank.repo.AccountRepo;
 import com.aurionpro.bank.repo.BankRepo;
@@ -197,6 +198,7 @@ public class AdminServiceImpl implements AdminService {
         logger.info("Bank added successfully with name: {}", bank.getBankName());
         return "Bank added successfully!";
     }
+    
     @Override
     public String deleteCustomer(int customerId) {
         logger.info("Deactivating customer with ID: {}", customerId);
@@ -248,9 +250,21 @@ public class AdminServiceImpl implements AdminService {
     }
 
     @Override
-    public Document getDocumentById(Long documentId) {
-        return documentRepo.findById(documentId)
-                .orElseThrow(() -> new RuntimeException("Document not found"));
+    public List<Document> getDocumentsByCustomerId(int customerId) {
+        // Fetch the customer by customer ID
+        Customer customer = customerRepo.findById(customerId)
+                .orElseThrow(() -> new CustomerServiceException("Customer not found with ID: " + customerId));
+
+        // Fetch the documents by customer
+        List<Document> documents = documentRepo.findByCustomer(customer);
+        
+        // Check if the customer has any documents
+        if (documents.isEmpty()) {
+            throw new CustomerServiceException("No documents found for the customer with ID: " + customerId);
+        }
+
+        return documents;
     }
+
 }
 

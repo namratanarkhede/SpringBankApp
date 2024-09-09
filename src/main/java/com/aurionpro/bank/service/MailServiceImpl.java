@@ -1,7 +1,14 @@
 package com.aurionpro.bank.service;
+import java.io.ByteArrayInputStream;
+
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
+
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
 
 @Service
 public class MailServiceImpl implements MailService {
@@ -111,4 +118,23 @@ public class MailServiceImpl implements MailService {
 
         sendEmail(to, subject, body);
     }
+    
+    
+    @Override
+    public void sendEmailWithAttachment(String to, String subject, String body, String attachmentName, ByteArrayInputStream attachment) {
+        try {
+            MimeMessage mimeMessage = javaMailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true);
+
+            helper.setTo(to);
+            helper.setSubject(subject);
+            helper.setText(body);
+            helper.addAttachment(attachmentName, new ByteArrayResource(attachment.readAllBytes()));
+
+            javaMailSender.send(mimeMessage);
+        } catch (MessagingException e) {
+            // Handle exceptions
+        }
+    }
+  
 }

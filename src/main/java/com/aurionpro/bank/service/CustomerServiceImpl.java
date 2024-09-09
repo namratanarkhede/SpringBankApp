@@ -1,7 +1,9 @@
 package com.aurionpro.bank.service;
 
-
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -12,31 +14,33 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.aurionpro.bank.dto.CustomerDto;
+import com.aurionpro.bank.dto.CustomerProfileUpdateDTO;
 import com.aurionpro.bank.dto.PageResponse;
 import com.aurionpro.bank.dto.TransactionDto;
 import com.aurionpro.bank.entity.Account;
 import com.aurionpro.bank.entity.Customer;
 import com.aurionpro.bank.entity.Document;
 import com.aurionpro.bank.entity.Transaction;
+import com.aurionpro.bank.entity.User;
 import com.aurionpro.bank.enums.AccountStatus;
 import com.aurionpro.bank.enums.DocumentType;
 import com.aurionpro.bank.enums.KycStatus;
 import com.aurionpro.bank.enums.TransactionType;
 import com.aurionpro.bank.exception.CustomerServiceException;
-import com.aurionpro.bank.exception.UserApiException;
+import com.aurionpro.bank.exception.DocumentUploadException;
 import com.aurionpro.bank.repo.AccountRepo;
 import com.aurionpro.bank.repo.CustomerRepo;
 import com.aurionpro.bank.repo.DocumentRepo;
 import com.aurionpro.bank.repo.TransactionRepo;
+import com.aurionpro.bank.repo.UserRepo;
 import com.cloudinary.Cloudinary;
 import com.cloudinary.utils.ObjectUtils;
-
 
 @Service
 public class CustomerServiceImpl implements CustomerService {
@@ -45,6 +49,9 @@ public class CustomerServiceImpl implements CustomerService {
 
     @Autowired
     private CustomerRepo customerRepo;
+
+    @Autowired
+    private UserRepo userRepo;
 
     @Autowired
     private AccountRepo accountRepo;
@@ -58,81 +65,68 @@ public class CustomerServiceImpl implements CustomerService {
     @Autowired
     private MailService mailService;
     
-
     @Autowired
     private DocumentRepo documentRepo;
     
     @Autowired
     private Cloudinary cloudinary;
 
-    
     @Override
     public CustomerDto validateCustomerLogin(String username, String password) {
         logger.info("Validating customer login for username: {}", username);
         
-        // Fetch customer by email
         Customer customer = customerRepo.findByEmail(username)
                 .orElseThrow(() -> new CustomerServiceException("Customer not found"));
         
-        // Validate password
         if (!passwordEncoder.matches(password, customer.getPassword())) {
             logger.warn("Invalid password for username: {}", username);
             throw new CustomerServiceException("Invalid password");
         }
         
-        // Successful validation
-        logger.info("Customer login validated successfully for username: {}", username);
         return new CustomerDto(
             customer.getCustomerId(),
             customer.getFirstName(),
             customer.getLastName(),
             customer.getEmail(),
-            customer.getDateOfBirth(),
-            null,
-            null
+            customer.getDateOfBirth()
         );
     }
+
+    @Transactional
     @Override
-    public CustomerDto updateCustomerProfile(String username, CustomerDto customerDto) {
-        logger.info("Updating profile for customer: {}", username);
+    public void updateCustomerProfile(String username, CustomerProfileUpdateDTO profileUpdateDTO) throws CustomerServiceException {
+        // Fetch existing customer by email (username)
+        Customer existingCustomer = customerRepo.findByEmail(username)
+                .orElseThrow(() -> new CustomerServiceException("Customer not found"));
 
-        // Fetch the existing customer
-        Customer customer = customerRepo.findByEmail(username)
-            .orElseThrow(() -> new UserApiException(HttpStatus.NOT_FOUND, "Customer not found"));
-
-        // Verify current password if provided
-        if (customerDto.getCurrentPassword() != null && !customerDto.getCurrentPassword().isEmpty()) {
-            if (!passwordEncoder.matches(customerDto.getCurrentPassword(), customer.getPassword())) {
-                throw new UserApiException(HttpStatus.NOT_FOUND, "Current password is incorrect");
-            }
-            // Update password if new password is provided
-            if (customerDto.getNewPassword() != null && !customerDto.getNewPassword().isEmpty()) {
-                customer.setPassword(passwordEncoder.encode(customerDto.getNewPassword()));
-            }
+        // Verify the current password
+        if (!passwordEncoder.matches(profileUpdateDTO.getCurrentPassword(), existingCustomer.getPassword())) {
+            throw new CustomerServiceException("Current password is incorrect");
         }
 
-        // Update profile details
-        customer.setFirstName(customerDto.getFirstName());
-        customer.setLastName(customerDto.getLastName());
-        customer.setEmail(customerDto.getEmail());
-        customer.setDateOfBirth(customerDto.getDateOfBirth());
+        // Update customer details
+        existingCustomer.setFirstName(profileUpdateDTO.getFirstName());
+        existingCustomer.setLastName(profileUpdateDTO.getLastName());
+        existingCustomer.setDateOfBirth(profileUpdateDTO.getDateOfBirth());
+        
+        // Encrypt and set the new password
+        existingCustomer.setPassword(passwordEncoder.encode(profileUpdateDTO.getNewPassword()));
 
-        // Save updated customer to the repository
-        customerRepo.save(customer);
+        // Save the updated customer entity
+        customerRepo.save(existingCustomer);
 
-        logger.info("Profile updated successfully for customer: {}", username);
+        // Fetch corresponding user entity
+        User user = userRepo.findByUsername(username)
+                .orElseThrow(() -> new CustomerServiceException("User not found"));
 
-        // Convert and return updated CustomerDto
-        return new CustomerDto(
-                customer.getCustomerId(),
-                customer.getFirstName(),
-                customer.getLastName(),
-                customer.getEmail(),
-                customer.getDateOfBirth(),
-                null, // Current password (not included in response)
-                null  // New password (not included in response)
-        );
+        // Encrypt and update the user password
+        user.setPassword(passwordEncoder.encode(profileUpdateDTO.getNewPassword()));
+
+        // Save the updated user entity
+        userRepo.save(user);
     }
+    
+    @Transactional
     @Override
     public void performTransaction(String username, TransactionDto transactionDto) {
         logger.info("Performing transaction for customer: {}, TransactionType: {}", username, transactionDto.getTransactionType());
@@ -142,7 +136,6 @@ public class CustomerServiceImpl implements CustomerService {
 
         validateAccountOwnership(senderAccount, customer);
 
-        // Check if the account is active
         if (senderAccount.getStatus() != AccountStatus.ACTIVE) {
             logger.error("Transaction failed for customer: {}. Account {} is not active.", username, senderAccount.getAccountNumber());
             throw new CustomerServiceException("Transaction cannot be performed on an inactive account.");
@@ -169,14 +162,12 @@ public class CustomerServiceImpl implements CustomerService {
                 throw new CustomerServiceException("Invalid transaction type");
         }
 
-        // Send transaction notification email
         String email = customer.getEmail();
         double newBalance = senderAccount.getBalance();
         mailService.sendTransactionNotification(email, transactionType.toString(), transactionAmount, newBalance, senderAccount.getAccountNumber());
 
         logger.info("Transaction completed successfully for customer: {}", username);
     }
-
 
     private Customer findCustomerByUsername(String username) {
         logger.debug("Finding customer by username: {}", username);
@@ -221,7 +212,6 @@ public class CustomerServiceImpl implements CustomerService {
     private void handleCredit(Account account, double transactionAmount, TransactionDto transactionDto) {
         logger.debug("Handling credit for account: {}, amount: {}", account.getAccountNumber(), transactionAmount);
 
-        // Ensure no receiver account is provided for credit transactions
         if (transactionDto.getReceiverAccountNumber() != null) {
             logger.warn("Receiver account number should not be provided for credit transactions. Provided receiver account: {}", transactionDto.getReceiverAccountNumber());
             throw new CustomerServiceException("Receiver account should not be provided for credit transactions");
@@ -236,15 +226,13 @@ public class CustomerServiceImpl implements CustomerService {
     private void handleDebit(Account account, double transactionAmount, TransactionDto transactionDto) {
         logger.debug("Handling debit for account: {}, amount: {}", account.getAccountNumber(), transactionAmount);
 
-        // Ensure no receiver account is provided for debit transactions
         if (transactionDto.getReceiverAccountNumber() != null) {
             logger.warn("Receiver account number should not be provided for debit transactions. Provided receiver account: {}", transactionDto.getReceiverAccountNumber());
             throw new CustomerServiceException("Receiver account should not be provided for debit transactions");
         }
 
         if (account.getBalance() < transactionAmount) {
-            logger.warn("Insufficient balance for debit. Account: {}, Available balance: {}", 
-                        account.getAccountNumber(), account.getBalance());
+            logger.warn("Insufficient balance for debit. Account: {}, Available balance: {}", account.getAccountNumber(), account.getBalance());
             throw new CustomerServiceException("Insufficient balance");
         }
 
@@ -254,83 +242,139 @@ public class CustomerServiceImpl implements CustomerService {
         saveTransaction(account, null, transactionAmount, transactionDto);
     }
 
-
     private void updateAccountBalances(Account senderAccount, Account receiverAccount, double transactionAmount) {
-        logger.debug("Updating account balances for sender account: {}, receiver account: {}, amount: {}", 
-                     senderAccount.getAccountNumber(), receiverAccount.getAccountNumber(), transactionAmount);
         senderAccount.setBalance(senderAccount.getBalance() - transactionAmount);
         receiverAccount.setBalance(receiverAccount.getBalance() + transactionAmount);
+
         accountRepo.save(senderAccount);
         accountRepo.save(receiverAccount);
     }
 
     private void saveTransaction(Account senderAccount, Account receiverAccount, double transactionAmount, TransactionDto transactionDto) {
-        logger.debug("Saving transaction. Sender account: {}, Receiver account: {}, amount: {}", 
-                     senderAccount.getAccountNumber(), 
-                     receiverAccount != null ? receiverAccount.getAccountNumber() : "N/A", 
-                     transactionAmount);
         Transaction transaction = new Transaction();
-        transaction.setTransactionAmount(transactionAmount);
-        transaction.setTransactionDate(transactionDto.getTransactionDate());
-        transaction.setTransactionType(transactionDto.getTransactionType());
         transaction.setSenderAccount(senderAccount);
         transaction.setReceiverAccount(receiverAccount);
+        transaction.setTransactionAmount(transactionAmount);
+        transaction.setTransactionType(transactionDto.getTransactionType());
+
         transactionRepo.save(transaction);
     }
 
-	
-	@Override
-	public PageResponse<TransactionDto> getTransactionsByCustomer(String username, int page, int size) {
-	    logger.info("Retrieving transactions for customer: {} with page: {} and size: {}", username, page, size);
-	    Customer customer = customerRepo.findByEmail(username)
-	            .orElseThrow(() -> new CustomerServiceException("Customer not found"));
-	
-	    Pageable pageable = PageRequest.of(page, size);
-	    Page<Transaction> transactionsPage = transactionRepo.findBySenderAccount_Customer(customer, pageable);
-	
-	    logger.info("Transactions retrieved successfully for customer: {}", username);
-	
-	    List<TransactionDto> transactionDtos = transactionsPage.getContent().stream()
-	            .map(transaction -> new TransactionDto(
-	                    transaction.getTransactionId(),
-	                    transaction.getTransactionDate(),
-	                    transaction.getTransactionType(),
-	                    transaction.getTransactionAmount(),
-	                    transaction.getSenderAccount().getAccountNumber(),
-	                    transaction.getReceiverAccount() != null ? transaction.getReceiverAccount().getAccountNumber() : null))
-	            .collect(Collectors.toList());
-	
-	    return new PageResponse<>(
-	            transactionDtos,
-	            transactionsPage.getNumber(),
-	            transactionsPage.getSize(),
-	            transactionsPage.getTotalElements(),
-	            transactionsPage.getTotalPages(),
-	            transactionsPage.isLast());
-	}
-	
     @Override
     public String uploadDocument(Integer customerId, MultipartFile file, DocumentType documentType) {
+        logger.info("Uploading document for customer: {}, DocumentType: {}", customerId, documentType);
+
+        Customer customer = customerRepo.findById(customerId)
+                .orElseThrow(() -> new DocumentUploadException("Customer not found"));
+
+        if (file.isEmpty()) {
+            throw new DocumentUploadException("File is empty");
+        }
+
         try {
-            Customer customer = customerRepo.findById(customerId)
-                    .orElseThrow(() -> new RuntimeException("Customer not found"));
-
-            // Upload the document to Cloudinary
-            Map<String, Object> uploadResult = cloudinary.uploader().upload(file.getBytes(), ObjectUtils.emptyMap());
-            String documentUrl = (String) uploadResult.get("url");
-
-            // Save the document details
+            Map<String, String> uploadResult = cloudinary.uploader().upload(file.getBytes(), ObjectUtils.asMap("resource_type", "auto"));
             Document document = new Document();
             document.setDocumentType(documentType);
-            document.setKycStatus(KycStatus.PENDING);
-            document.setDocumentUrl(documentUrl);
+            document.setDocumentUrl(uploadResult.get("url"));
             document.setCustomer(customer);
+            document.setKycStatus(KycStatus.PENDING);;
 
             documentRepo.save(document);
 
-            return "Document uploaded successfully!";
+            logger.info("Document uploaded successfully for customer: {}", customerId);
+            return uploadResult.get("url");
         } catch (IOException e) {
-            throw new RuntimeException("Failed to upload document", e);
+            logger.error("Error uploading document for customer: {}", customerId, e);
+            throw new DocumentUploadException("Error uploading document", e);
+        }
+    }
+
+    @Override
+    public PageResponse<TransactionDto> getTransactionsByCustomer(String username, int page, int size) {
+        logger.info("Retrieving transactions for customer: {} with page: {} and size: {}", username, page, size);
+
+        Customer customer = customerRepo.findByEmail(username)
+                .orElseThrow(() -> new CustomerServiceException("Customer not found"));
+
+        Pageable pageable = PageRequest.of(page, size);
+        Page<Transaction> transactionsPage = transactionRepo.findBySenderAccount_Customer(customer, pageable);
+
+        logger.info("Transactions retrieved successfully for customer: {}", username);
+
+        List<TransactionDto> transactionDtos = transactionsPage.getContent().stream()
+                .map(transaction -> new TransactionDto(
+                        transaction.getTransactionId(),
+                        transaction.getTransactionDate(),
+                        transaction.getTransactionType(),
+                        transaction.getTransactionAmount(),
+                        transaction.getSenderAccount().getAccountNumber(),
+                        transaction.getReceiverAccount() != null ? transaction.getReceiverAccount().getAccountNumber() : null))
+                .collect(Collectors.toList());
+
+        return new PageResponse<>(
+                transactionDtos,
+                transactionsPage.getNumber(),
+                transactionsPage.getSize(),
+                transactionsPage.getTotalElements(),
+                transactionsPage.getTotalPages(),
+                transactionsPage.isLast());
+    }
+    
+    
+    @Override
+    public void sendTransactionDetailsByEmail(String username){
+        // Fetch customer by email (assuming username is the email)
+        Customer customer = customerRepo.findByEmail(username)
+                .orElseThrow(() -> new CustomerServiceException("Customer not found"));
+
+        // Fetch transactions with pagination
+        Pageable pageable = PageRequest.of(0, 100); // Adjust page size as needed
+        Page<Transaction> transactionsPage = transactionRepo.findBySenderAccount_Customer(customer, pageable);
+
+        if (transactionsPage.isEmpty()) {
+            throw new CustomerServiceException("No transactions found for the customer");
+        }
+
+        // Convert transactions to CSV
+        ByteArrayInputStream csvStream = createCsv(transactionsPage.getContent());
+
+        // Send email with attachment
+        mailService.sendEmailWithAttachment(customer.getEmail(), "Transaction Details",
+                "Please find attached the details of your transactions.", "transactions.csv", csvStream);
+    }
+
+    private ByteArrayInputStream createCsv(List<Transaction> transactions) throws CustomerServiceException {
+        final String CSV_HEADER = "Transaction ID,Transaction Date,Transaction Type,Transaction Amount,Sender Account,Receiver Account\n";
+
+        // Create StringWriter and PrintWriter
+        StringWriter stringWriter = new StringWriter();
+        PrintWriter writer = new PrintWriter(stringWriter);
+
+        try {
+            // Write CSV header
+            writer.write(CSV_HEADER);
+
+            // Write transaction details into CSV format
+            for (Transaction transaction : transactions) {
+                writer.printf("%d,%s,%s,%.2f,%s,%s\n",
+                        transaction.getTransactionId(),
+                        transaction.getTransactionDate(),
+                        transaction.getTransactionType(),
+                        transaction.getTransactionAmount(),
+                        transaction.getSenderAccount().getAccountNumber(),
+                        transaction.getReceiverAccount() != null ? transaction.getReceiverAccount().getAccountNumber() : "N/A");
+            }
+
+            // Flush the writer to ensure all data is written to the StringWriter
+            writer.flush();
+
+            // Convert to ByteArrayInputStream and return
+            return new ByteArrayInputStream(stringWriter.toString().getBytes());
+
+        } finally {
+            // Ensure writer is closed
+            writer.close();
         }
     }
 }
+

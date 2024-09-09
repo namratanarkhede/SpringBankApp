@@ -1,5 +1,7 @@
 package com.aurionpro.bank.service;
 
+import java.util.List;
+
 import org.springframework.data.domain.Pageable;
 
 import com.aurionpro.bank.dto.AccountDto;
@@ -22,7 +24,7 @@ public interface AdminService {
 
     // Method to update KYC status
     void verifyDocument(Long documentId, KycStatus kycStatus);
-    Document getDocumentById(Long documentId);
+    List<Document> getDocumentsByCustomerId(int customerId);
 
     //void sendEmailToCustomer(int customerId);
     

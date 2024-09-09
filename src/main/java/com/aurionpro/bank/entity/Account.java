@@ -3,9 +3,7 @@ package com.aurionpro.bank.entity;
 import java.util.List;
 
 import com.aurionpro.bank.enums.AccountStatus;
-import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonManagedReference;
 
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
@@ -43,16 +41,20 @@ public class Account {
 
     @ManyToOne
     @JoinColumn(name = "customer_id", nullable = false)
+    @JsonIgnore
     private Customer customer;
 
     @ManyToOne
     @JoinColumn(name = "bank_id", nullable = false)
+    @JsonIgnore
     private Bank bank;
 
     @OneToMany(mappedBy = "senderAccount",cascade = {CascadeType.MERGE, CascadeType.REFRESH, CascadeType.DETACH})
+    @JsonIgnore
     private List<Transaction> transactionsAsSender;
 
     @OneToMany(mappedBy = "receiverAccount",cascade = {CascadeType.MERGE, CascadeType.REFRESH, CascadeType.DETACH})
+    @JsonIgnore
     private List<Transaction> transactionsAsReceiver;
     
 

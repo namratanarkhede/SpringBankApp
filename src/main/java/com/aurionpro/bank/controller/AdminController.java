@@ -1,5 +1,7 @@
 package com.aurionpro.bank.controller;
 
+import java.util.List;
+
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -22,6 +24,7 @@ import com.aurionpro.bank.entity.Bank;
 import com.aurionpro.bank.entity.Customer;
 import com.aurionpro.bank.entity.Document;
 import com.aurionpro.bank.enums.KycStatus;
+import com.aurionpro.bank.exception.CustomerServiceException;
 import com.aurionpro.bank.service.AdminService;
 
 import jakarta.transaction.Transactional;
@@ -93,10 +96,13 @@ public class AdminController {
     }
 
     @PreAuthorize("hasRole('ROLE_ADMIN')")
-    @GetMapping("/document/{documentId}")
-    public ResponseEntity<Document> getDocumentById(@PathVariable Long documentId) {
-        Document document = adminService.getDocumentById(documentId);
-        return new ResponseEntity<>(document, HttpStatus.OK);
+    @GetMapping("/customer/{customerId}")
+    public ResponseEntity<List<Document>> getDocumentsByCustomerId(@PathVariable int customerId) {
+        try {
+            List<Document> documents = adminService.getDocumentsByCustomerId(customerId);
+            return ResponseEntity.ok(documents);
+        } catch (CustomerServiceException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        }
     }
-	
 }

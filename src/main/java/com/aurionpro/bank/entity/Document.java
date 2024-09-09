@@ -2,6 +2,8 @@ package com.aurionpro.bank.entity;
 
 import com.aurionpro.bank.enums.DocumentType;
 import com.aurionpro.bank.enums.KycStatus;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -32,5 +34,6 @@ public class Document {
 
     @ManyToOne
     @JoinColumn(name = "customer_id", nullable = false)
+    @JsonIgnore
     private Customer customer;
 }

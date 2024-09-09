@@ -2,6 +2,7 @@ package com.aurionpro.bank.dto;
 
 import java.time.LocalDate;
 
+
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -33,9 +34,5 @@ public class CustomerDto {
     @NotNull(message = "Date of birth is required")
     @Past(message = "Date of birth must be a past date")
     private LocalDate dateOfBirth;
-    
-    private String currentPassword; // For verifying the current password
-
-    private String newPassword; // For setting a new password
     
 }
